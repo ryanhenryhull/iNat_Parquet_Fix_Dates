@@ -243,7 +243,7 @@ obs$probable_and_certain_ddmmyyyy_combined <-
 
 # Section 7: Assessing the quality of the "assumed" dates of ambiguous cases
 # when there is indeed a day > 12 (clear case), what percentage of them are in the first position? 
-# this serves as an estimate for the non-clear cases, to see how accurate our day-first assumption is
+# this serves as an estimate for the non-clear cases, to see how accurate our month-first assumption is
 nb_total_obs <- nrow(obs)
 test_yyyy_md_md_string <- sapply(obs$yyyy_md_md,  function(x) if(length(x)==0) NA else x[1])
 positions_yyyy_md_md <- regexec("(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})", test_yyyy_md_md_string) # this will give c("yyyy-md-md", "yyyy", "md", "md")
