@@ -237,7 +237,7 @@ obs$probable_ddmmyyyy <-
     paste(obs$probable_dd, obs$probable_mm, obs$year, sep="/"),
     NA)
 
-obs$probable_and_certain_ddmmyyyy_combined <-
+obs$standardized_date <-
   ifelse((!is.na(obs$probable_ddmmyyyy)), obs$probable_ddmmyyyy, obs$certain_ddmmyyyy)
 
 
@@ -293,6 +293,11 @@ percent_successful_guess_of_month_first <- test_result$percent_successful_guess_
 probable_date_string <- paste0("probable_ddmmyyyy_to_approx_", percent_successful_guess_of_month_first,"_percent_certainty")
 colnames(obs)[colnames(obs) == "probable_ddmmyyyy"] <- probable_date_string
 
+# Creating easy column to identify certain dates over probable dates
+obs$is_ambiguous <- 
+  ifelse(is.na(obs$probable_ddmmyyyy_to_approx_99.99959618_percent_certainty),
+         0,
+         1)
 
 
 # Section 8: Writing out data with unified columns to desired location
@@ -313,6 +318,8 @@ obs$certain_dd <- NULL
 obs$probable_dd <- NULL
 obs$certain_mm <- NULL
 obs$probable_mm <- NULL
+obs$certain_ddmmyyyy <- NULL
+obs$probable_ddmmyyyy_to_approx_99.99959618_percent_certainty <- NULL
 
 #### (commented out the line to avoid massive accident downloads in undesired locations)
 #### write_parquet(obs, "path/to/your/file.parquet")
