@@ -11,6 +11,7 @@ library(dplyr)
 library(arrow)
 library(dbplyr, warn.conflicts = FALSE)
 library(duckdb)
+library(stringr)
 
 # Loading and viewing data from iNat parquet file
 rm(list=ls())
@@ -67,33 +68,40 @@ obs$year4num <- NULL
 
 # Section 3 - Extracting the Month and dates when month listed as letters
 
-# Finding the positions
-months_abbreviated <- c("Jan","Feb","Mar","Apr","May","Jun", "Jul","Aug","Sep",
-                        "Oct","Nov","Dec","jan","feb","mar","apr","may","jun",
-                        "jul","aug","sep","oct","nov","dec", "fév","avr","juil",
-                        "sept")
-months_full <- c("January", "February","March","April","May","June","July",
-                 "August", "September","October","November","December",
-                 "january", "february","march","april","may","june","july",
-                 "august", "september","october","november","december",
-                 "janvier","février","mars","avril","mai","juin","juillet",
-                 "aout","août","septembre","octobre","novembre","décembre",
-                 "Janvier","Février","Mars","Avril","Mai","Juin","Juillet",
-                 "Aout","Août","Septembre","Octobre","Novembre","Décembre")
-months_alphabetic <- c(months_abbreviated, months_full)
-months_alphabetic_regex <- paste(months_alphabetic, collapse="|")
-month_alphabetic_positions <- regexpr(months_alphabetic_regex, obs$observed_on_string) # -1 if not found
+# create a lookup table
+month_lookup <- c(
+  Jan=1, January=1, janv=1, janvier=1, jan=1, january=1,
+  Feb=2, February=2, Fév=2, fév=2, fevrier=2, février=2, feb=2, february=2,
+  Mar=3, March=3, mars=3, mar=3, march=3,
+  Apr=4, April=4, avr=4, avril=4, apr=4, april=4,
+  May=5, mai=5, may=5,
+  Jun=6, June=6, juin=6, jun=6, june=6,
+  Jul=7, July=7, juil=7, juillet=7, jul=7, july=7,
+  Aug=8, August=8, aout=8, août=8, aug=8, august=8,
+  Sep=9, Sept=9, September=9, sept=9, septembre=9, sep=9, september=9,
+  Oct=10, October=10, oct=10, octobre=10, oct=10, october=10,
+  Nov=11, November=11, nov=11, novembre=11, nov=11, november=11,
+  Dec=12, December=12, déc=12, dec=12, décembre=12, dec=12, december=12
+)
 
-# how many of these are there?
-nb_alhpabetical <- length(which(month_alphabetic_positions!=-1)) # roughly 15% of cases
+# create regex and use str_extract to take out the month
+months_alphabetic_regex <- paste0("\\b(", paste(names(month_lookup), collapse="|"), ")\\b")
+obs$just_month_when_alphabetic <- str_extract(obs$observed_on_string, months_alphabetic_regex)
+nb_alhpabetic <- length(which(!is.na(obs$just_month_when_alphabetic))) # roughly 15% of cases
 
-# Assigning them or NA to month column
-obs$month_alphabetic <-
-  ifelse(month_alphabetic_positions == -1, NA, regmatches(obs$observed_on_string, month_alphabetic_positions))
+# assigning it to new column
+obs$month_numeric_when_alphabetic <- sapply(obs$just_month_when_alphabetic, function(x){
+  if (!is.na(x)){
+    month_lookup[[x]]
+  }
+  else{
+    NA
+  }
+})
 
 # Finding the dates from these rows - should be the only " XX " in the string
 obs$day_when_month_alphabetical <- NA
-rows_with_alphabetical_month <- (month_alphabetic_positions != -1) & !is.na(month_alphabetic_positions)
+rows_with_alphabetical_month <- !is.na(obs$month_numeric_when_alphabetic)
 positions_alpha_day <- regexec("\\s(\\d{2})\\s", obs$observed_on_string[rows_with_alphabetical_month])
 day_when_alpha <- regmatches(obs$observed_on_string[rows_with_alphabetical_month], positions_alpha_day)
 obs$day_when_month_alphabetical[rows_with_alphabetical_month] <- 
@@ -102,7 +110,6 @@ obs$day_when_month_alphabetical[rows_with_alphabetical_month] <-
 # Looking for errors
 length(which(sapply(obs$day_when_month_alphabetical, length)> 1)) # any double dates? should be none
 length(which(obs$day_when_month_alphabetical > 31))# any false dates? should be none
-
 
 
 # Section 4: Extracting months and dates when listed as yyyy-m?d?-m?d?
@@ -195,8 +202,8 @@ length(which(!is.na(obs$day_when_md_md_yyyy)))
 # Section 5: Dealing with exceptions
 nb_no_date <- length(obs$observed_on_string[is.na(obs$observed_on_string)]) # when no date is listed
 # very few (0.02%) have some non-NA entry other than the formats we've handled. deal with them here if one wishes to
-nb_entries_not_caught <- nrow(obs) - sum(nb_alhpabetical, nb_md_md_yyyy, nb_yyyy_md_md, nb_no_date)
-paste(nb_entries_not_caught)
+nb_entries_not_caught <- nrow(obs) - sum(nb_alhpabetic, nb_md_md_yyyy, nb_yyyy_md_md, nb_no_date)
+
 
 
 # Section 6: Assembling uniform date column 
@@ -211,7 +218,7 @@ obs$probable_dd <-
          ifelse(!is.na(obs$likely_day_when_md_md_yyyy), obs$likely_day_when_md_md_yyyy, NA))
 
 obs$certain_mm <-
-  ifelse(!is.na(obs$month_alphabetic), match(obs$month_alphabetic, month.abb),
+  ifelse(!is.na(obs$month_numeric_when_alphabetic), obs$month_numeric_when_alphabetic,
          ifelse(!is.na(obs$month_when_yyyy_md_md), obs$month_when_yyyy_md_md,
                 ifelse(!is.na(obs$month_when_md_md_yyyy), obs$month_when_md_md_yyyy, NA)))
 
@@ -237,7 +244,7 @@ obs$probable_ddmmyyyy <-
     paste(obs$probable_dd, obs$probable_mm, obs$year, sep="/"),
     NA)
 
-obs$standardized_date <-
+obs$standardized_ddmmyyyy <-
   ifelse((!is.na(obs$probable_ddmmyyyy)), obs$probable_ddmmyyyy, obs$certain_ddmmyyyy)
 
 
@@ -299,6 +306,12 @@ obs$is_ambiguous <-
          0,
          1)
 
+# Screen for months that should not be
+improper_months_regex <- paste0("^\\d{1,2}/(", paste0(13:99, collapse = "|"), ")/\\d{4}$")
+erroneous_months <- which(!is.na(str_extract(obs$standardized_ddmmyyyy, improper_months_regex)))
+erroneous_months_df <- obs[erroneous_months,]
+
+
 
 # Section 8: Writing out data with unified columns to desired location
 obs$year <- NULL
@@ -326,8 +339,6 @@ obs$probable_ddmmyyyy_to_approx_99.99959618_percent_certainty <- NULL
 
 # View what you just downloaded:
 downloaded_fix_dates_inat_pq <- arrow::open_dataset("path/to/your/file.parquet")
-
-# Load the portion of the parquet file you wish to modify the dates for
 fixed_dates_obs <- downloaded_fix_dates_inat_pq |>
   # select columns we want to keep
   select(c(longitude, latitude,
@@ -335,5 +346,5 @@ fixed_dates_obs <- downloaded_fix_dates_inat_pq |>
            iconic_taxon_name,
            scientific_name,
            coordinates_obscured,
-           place_county_name, certain_ddmmyyyy, probable_date_string, probable_and_certain_ddmmyyyy_combined, )) |>
+           place_county_name, certain_ddmmyyyy, standardized_ddmmyyyy, is_ambiguous )) |>
   collect()
